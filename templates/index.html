@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Photo Restoration</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .drop-zone {
+            transition: all 0.3s ease;
+            border: 2px dashed #4F46E5;
+        }
+        .drop-zone.dragover {
+            background-color: #EEF2FF;
+            border-color: #4F46E5;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4F46E5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .image-comparison {
+            position: relative;
+            overflow: hidden;
+        }
+        .image-comparison img {
+            max-height: 500px;
+            object-fit: contain;
+        }
+        .progress-bar {
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <h1 class="text-4xl font-bold text-gray-900 mb-4">AI Photo Restoration</h1>
+            <p class="text-lg text-gray-600">Restore your old photos with artificial intelligence</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="bg-white rounded-xl shadow-lg p-8">
+            <!-- Upload Section -->
+            <div class="mb-8">
+                <div class="drop-zone rounded-lg p-8 text-center cursor-pointer hover:bg-gray-50" id="dropZone">
+                    <input type="file" id="fileInput" class="hidden" accept="image/*">
+                    <div class="space-y-4">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <div class="text-gray-600">
+                            <p class="text-lg font-medium">Drop your photo here or click to upload</p>
+                            <p class="text-sm">Supports JPG, PNG files</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Processing Button -->
+            <div class="text-center mb-8">
+                <button id="uploadButton" disabled 
+                    class="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700 transition-colors">
+                    Restore Photo
+                </button>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loading" class="hidden">
+                <div class="flex flex-col items-center space-y-4">
+                    <div class="loading-spinner"></div>
+                    <p class="text-gray-600">Processing your photo...</p>
+                    <div class="w-full max-w-md bg-gray-200 rounded-full h-2.5">
+                        <div id="progressBar" class="progress-bar bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p id="timer" class="text-sm font-mono text-gray-500">Time elapsed: 0:00</p>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="hidden text-red-600 text-center mb-8"></div>
+
+            <!-- Results Section -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="space-y-4">
+                    <h3 class="text-lg font-medium text-gray-900 text-center">Original Photo</h3>
+                    <div class="aspect-w-16 aspect-h-9 rounded-lg overflow-hidden bg-gray-100">
+                        <img id="originalPreview" class="object-contain w-full h-full">
+                    </div>
+                </div>
+                <div class="space-y-4">
+                    <h3 class="text-lg font-medium text-gray-900 text-center">Restored Photo</h3>
+                    <div class="aspect-w-16 aspect-h-9 rounded-lg overflow-hidden bg-gray-100">
+                        <img id="restoredPreview" class="object-contain w-full h-full">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadButton = document.getElementById('uploadButton');
+        const originalPreview = document.getElementById('originalPreview');
+        const restoredPreview = document.getElementById('restoredPreview');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('errorMessage');
+        let timerInterval;
+        let startTime;
+
+        // Drag and drop handlers
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        });
+
+        dropZone.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('image/')) {
+                    // Preview original image
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        originalPreview.src = e.target.result;
+                        uploadButton.disabled = false;
+                    };
+                    reader.readAsDataURL(file);
+                    errorMessage.style.display = 'none';
+                } else {
+                    showError('Please select an image file.');
+                    uploadButton.disabled = true;
+                }
+            }
+        }
+
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        function updateTimer() {
+            const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+            const minutes = Math.floor(elapsedTime / 60);
+            const seconds = elapsedTime % 60;
+            document.getElementById('timer').textContent = 
+                `Time elapsed: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        uploadButton.addEventListener('click', async () => {
+            console.log("Upload button clicked");
+            const file = fileInput.files[0] || new DataTransfer().files[0];
+            if (!file) {
+                console.log("No file selected");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                loading.style.display = 'block';
+                uploadButton.disabled = true;
+                errorMessage.style.display = 'none';
+                
+                // Start the timer
+                startTimer();
+                
+                console.log("Sending request to server...");
+                const response = await fetch('http://localhost:8000/restore-photo/', {
+                    method: 'POST',
+                    body: formData,
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                });
+
+                console.log("Response received:", response.status);
+
+                if (!response.ok) {
+                    throw new Error(`Restoration failed: ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                restoredPreview.src = URL.createObjectURL(blob);
+                console.log("Image processed successfully");
+            } catch (error) {
+                console.error('Error details:', error);
+                showError(`An error occurred during photo restoration: ${error.message}`);
+            } finally {
+                stopTimer();
+                loading.style.display = 'none';
+                uploadButton.disabled = false;
+            }
+        });
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.style.display = 'block';
+        }
+    </script>
+</body>
+</html> 
